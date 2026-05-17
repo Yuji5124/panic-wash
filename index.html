@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>パニックウォッシュ</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="game-header">
+      <h1 class="game-title">パニックウォッシュ</h1>
+      <div class="timer-wrap">
+        <span class="timer-label">残り</span>
+        <span id="timer" class="timer-value">90</span>
+        <span class="timer-label">秒</span>
+      </div>
+    </header>
+
+    <!-- Player 2 (上側・逆向き表示) -->
+    <section class="player-area" id="area-p2" data-player="2">
+      <div class="player-header">
+        <span class="player-label">Player 2</span>
+        <div class="player-info">
+          <span class="dirty-count-label">汚れ: <span id="dirty-p2" class="dirty-count">0</span></span>
+        </div>
+        <button class="zenkeshi-btn" id="zenkeshi-p2" disabled>
+          <span class="zenkeshi-text">全消し！</span>
+          <span class="zenkeshi-timer" id="zenkeshi-timer-p2"></span>
+        </button>
+      </div>
+      <div class="grid" id="grid-p2"></div>
+    </section>
+
+    <div class="divider">
+      <div class="divider-line"></div>
+      <span class="divider-label">VS</span>
+      <div class="divider-line"></div>
+    </div>
+
+    <!-- Player 1 (下側・正向き表示) -->
+    <section class="player-area" id="area-p1" data-player="1">
+      <div class="grid" id="grid-p1"></div>
+      <div class="player-header player-header--bottom">
+        <span class="player-label">Player 1</span>
+        <div class="player-info">
+          <span class="dirty-count-label">汚れ: <span id="dirty-p1" class="dirty-count">0</span></span>
+        </div>
+        <button class="zenkeshi-btn" id="zenkeshi-p1" disabled>
+          <span class="zenkeshi-text">全消し！</span>
+          <span class="zenkeshi-timer" id="zenkeshi-timer-p1"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 結果オーバーレイ -->
+    <div id="result-overlay" class="result-overlay hidden">
+      <div class="result-box">
+        <p id="result-text" class="result-text"></p>
+        <button id="restart-btn" class="restart-btn">リスタート</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
