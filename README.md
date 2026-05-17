@@ -132,17 +132,26 @@ python -m http.server 8080
 
 ### `js/firebase-config.js` の編集
 
+Firebase Console > プロジェクト設定 > マイアプリ の画面から値をコピーして貼り付けてください。
+`★ YOUR_...` と書かれた4項目を必ず書き換えてください。
+
 ```js
 const firebaseConfig = {
-  apiKey:            "取得した値",
-  authDomain:        "your-project.firebaseapp.com",
-  databaseURL:       "https://your-project-default-rtdb.firebaseio.com",
-  projectId:         "your-project",
-  storageBucket:     "your-project.appspot.com",
-  messagingSenderId: "123456789",
-  appId:             "1:123:web:abc"
+  apiKey:            "AIza...",          // ★ 必須
+  authDomain:        "panic-wash.firebaseapp.com",
+  databaseURL:       "https://panic-wash-default-rtdb.asia-southeast1.firebasedatabase.app", // ★ 必須（Realtime DB作成後）
+  projectId:         "panic-wash",
+  storageBucket:     "panic-wash.firebasestorage.app",
+  messagingSenderId: "123456789",        // ★ 必須
+  appId:             "1:123:web:abc",    // ★ 必須
+  measurementId:     "G-XXXXXXXX"       // 任意（Analytics使用時）
 };
 ```
+
+> ⚠ `databaseURL` は Realtime Database を作成しないと表示されません。
+> Database 作成 → ロケーション選択 → 「テストモード」で開始 → URLをコピーして貼り付けてください。
+>
+> 未入力の項目があると起動時に **「Firebase 設定が未入力です」** エラーが表示されます。
 
 ### GitHub Pages での公開手順
 

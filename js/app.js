@@ -19,8 +19,22 @@
     showFatalError('Firebase SDK が読み込めませんでした。<br>インターネット接続を確認してください。');
     return;
   }
-  if (!window.firebaseConfig || firebaseConfig.apiKey === 'YOUR_API_KEY') {
-    showFatalError('Firebase 設定が未入力です。<br><code>js/firebase-config.js</code> を編集してください。');
+  if (!window.firebaseConfig) {
+    showFatalError('firebase-config.js が読み込めませんでした。<br>ファイルの配置を確認してください。');
+    return;
+  }
+  var _cfg = firebaseConfig;
+  var _missing = [];
+  if (!_cfg.apiKey            || _cfg.apiKey.indexOf('YOUR')            !== -1) _missing.push('apiKey');
+  if (!_cfg.databaseURL        || _cfg.databaseURL.indexOf('YOUR')       !== -1) _missing.push('databaseURL');
+  if (!_cfg.messagingSenderId  || _cfg.messagingSenderId.indexOf('YOUR') !== -1) _missing.push('messagingSenderId');
+  if (!_cfg.appId              || _cfg.appId.indexOf('YOUR')             !== -1) _missing.push('appId');
+  if (_missing.length > 0) {
+    showFatalError(
+      'Firebase 設定が未入力です。<br>' +
+      '<code>js/firebase-config.js</code> の以下の項目を入力してください:<br><br>' +
+      _missing.map(function(k) { return '・' + k; }).join('<br>')
+    );
     return;
   }
 

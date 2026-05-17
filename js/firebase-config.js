@@ -1,20 +1,14 @@
 // ============================================================
 // js/firebase-config.js — Firebase プロジェクト設定
 // ============================================================
-// Firebase Console (https://console.firebase.google.com/) で
-// プロジェクトを作成し、以下の値を書き換えてください。
-//
-// 取得手順:
-//   Firebase Console > プロジェクト設定 > マイアプリ
-//   > ウェブアプリを追加 > SDK の設定と構成
-// ============================================================
 
 const firebaseConfig = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT.firebaseapp.com",
-  databaseURL:       "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId:         "YOUR_PROJECT",
-  storageBucket:     "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID"
+  apiKey:            "AIzaSyAfUUVtBqIyphOlmpkdnmT0xLVdX1h4",
+  authDomain:        "panic-wash.firebaseapp.com",
+  databaseURL:       "https://panic-wash-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:         "panic-wash",
+  storageBucket:     "panic-wash.firebasestorage.app",
+  messagingSenderId: "232052808438",
+  appId:             "1:232052808438:web:7bd6e8f44e6cf4b5cead7",
+  measurementId:     "G-8NVS4YT647"
 };
