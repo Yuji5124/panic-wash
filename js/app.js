@@ -47,39 +47,49 @@
     return;
   }
 
-  // ===== 定数 =====
+  // ===== バランス調整用定数（ここを変えるだけでゲーム感が変わる） =====
+  var GAME_DURATION_SEC     = 60;    // 制限時間（秒）
+  var ZENKESHI_DIRTY        = 5;     // 全消し通常攻撃（マス）
+  var ZENKESHI_DIRTY_CHARGE = 7;     // 全消し強攻撃（マス）
+  var ZENKESHI_CHARGE_MS    = 2000;  // 強攻撃チャージ時間（ms）
+  var INITIAL_DIRTY         = 3;     // 開始時の初期汚れ数（マス）
+  var ZENKESHI_DURATION_MS  = 5000;  // 全消しボタンの有効時間（ms）
+  var PINCH_DIRTY_THRESHOLD = 12;    // ピンチ洗浄が発動する汚れ数（マス）
+  var PINCH_TIME_THRESHOLD  = 20;    // ピンチ洗浄が発動する残り時間（秒）
+  var PINCH_CHAIN_CHANCE    = 0.20;  // ピンチ洗浄の連鎖確率
+  // 汚れ発生間隔は getDirtyInterval() で段階管理
+  // 60〜41s: 2000ms / 40〜21s: 1700ms / 20〜11s: 1400ms / 10〜0s: 1100ms
+
+  // ===== 内部定数（通常は変更不要） =====
   var GRID_SIZE            = 16;
-  var INITIAL_DIRTY        = 3;
-  var DIRTY_INTERVAL_MS    = 1800;
-  var ZENKESHI_DIRTY       = 5;
-  var ZENKESHI_DURATION_MS = 5000;
-  var GAME_DURATION_SEC    = 60;
-  var TIMER_WARNING_SEC    = 15;
-  var TIMER_DANGER_SEC     = 10;
-  var DIRTY_SYNC_MS        = 3000;  // Firebase への汚れ数同期間隔
+  var TIMER_WARNING_SEC    = 15;    // タイマー警告（黄色）開始秒数
+  var TIMER_DANGER_SEC     = 10;    // タイマー危険（赤点滅）開始秒数
+  var DIRTY_SYNC_MS        = 3000;  // Firebase への汚れ数同期間隔（ms）
 
   // ===== セッション状態 =====
   var session = { roomId: null, myRole: null, oppRole: null, startAt: null };
 
   // ===== ゲーム状態（ローカルのみ） =====
   var game = {
-    tiles:          [],
-    zenkeshiActive: false,
-    timeLeft:       GAME_DURATION_SEC,
-    running:        false,
-    finished:       false,
+    tiles:           [],
+    zenkeshiActive:  false,
+    zenkeshiCharged: false,
+    timeLeft:        GAME_DURATION_SEC,
+    running:         false,
+    finished:        false,
   };
 
   var processedAttackIds = {};   // 処理済み攻撃ID管理
   var activeRefs         = [];   // Firebaseリスナー解除用
 
   // ===== タイマーID =====
-  var timerInterval      = null;
-  var dirtyInterval      = null;
-  var dirtySyncInterval  = null;
-  var zenkeshiTimeout    = null;
-  var zenkeshiCountdown  = null;
-  var timeoutFallback    = null;
+  var timerInterval         = null;
+  var dirtyInterval         = null;  // setTimeout ID（段階式再スケジュール）
+  var dirtySyncInterval     = null;
+  var zenkeshiTimeout       = null;
+  var zenkeshiCountdown     = null;
+  var zenkeshiChargeTimeout = null;
+  var timeoutFallback       = null;
 
   // ===== DOM =====
   var dom = {
@@ -117,6 +127,7 @@
     gameGridWrap:    document.getElementById('game-grid-wrap'),
     zenkeshiBtn:     document.getElementById('zenkeshi-btn'),
     zenkeshiTimerDisp: document.getElementById('zenkeshi-timer-disp'),
+    pinchNotif:        document.getElementById('pinch-notif'),
     // Result
     resultContent:  document.getElementById('result-content'),
     btnToLobby:     document.getElementById('btn-to-lobby'),
@@ -290,11 +301,12 @@
     processedAttackIds = {};
 
     game = {
-      tiles:          new Array(GRID_SIZE).fill(false),
-      zenkeshiActive: false,
-      timeLeft:       GAME_DURATION_SEC,
-      running:        false,
-      finished:       false,
+      tiles:           new Array(GRID_SIZE).fill(false),
+      zenkeshiActive:  false,
+      zenkeshiCharged: false,
+      timeLeft:        GAME_DURATION_SEC,
+      running:         false,
+      finished:        false,
     };
 
     dom.timer.textContent = GAME_DURATION_SEC;
@@ -303,8 +315,10 @@
     dom.dirtyOpp.textContent   = '?';
     dom.attackNotif.textContent = '';
     dom.zenkeshiBtn.disabled   = true;
-    dom.zenkeshiBtn.classList.remove('active');
+    dom.zenkeshiBtn.classList.remove('active', 'charged');
+    dom.zenkeshiBtn.querySelector('.zenkeshi-text').textContent = '全消し！';
     dom.zenkeshiTimerDisp.textContent = '';
+    dom.pinchNotif.classList.remove('pinch-notif--active');
 
     buildGrid();
     addRandomDirty(INITIAL_DIRTY);
@@ -316,7 +330,7 @@
     setTimeout(function() {
       game.running      = true;
       timerInterval     = setInterval(onTimerTick, 1000);
-      dirtyInterval     = setInterval(onDirtyTick, DIRTY_INTERVAL_MS);
+      scheduleDirtyTick();
       dirtySyncInterval = setInterval(syncDirtyCount, DIRTY_SYNC_MS);
       listenAttackEvents();
       listenOpponentStatus();
@@ -346,9 +360,37 @@
     game.tiles[index] = false;
     tile.classList.add('pressed');
     setTimeout(function() { tile.classList.remove('pressed'); }, 100);
+
+    // ピンチ洗浄チェーン
+    if (isPinchActive() && Math.random() < PINCH_CHAIN_CHANCE) {
+      var adj = getAdjacentIndices(index).filter(function(i) { return game.tiles[i]; });
+      if (adj.length > 0) {
+        var chainIdx = adj[Math.floor(Math.random() * adj.length)];
+        game.tiles[chainIdx] = false;
+        var chainEl = dom.gridSelf.querySelector('[data-index="' + chainIdx + '"]');
+        if (chainEl) triggerAnimation(chainEl, 'tile--pinch-chain', 450);
+      }
+    }
+
     renderGrid();
     setTimeout(function() { triggerAnimation(tile, 'tile--sparkle', 380); }, 110);
     checkZenkeshi();
+  }
+
+  // ===== 汚れ発生間隔（段階式） =====
+  function getDirtyInterval() {
+    if (game.timeLeft > 40) return 2000;
+    if (game.timeLeft > 20) return 1700;
+    if (game.timeLeft > 10) return 1400;
+    return 1100;
+  }
+
+  function scheduleDirtyTick() {
+    dirtyInterval = setTimeout(function() {
+      if (!game.running) return;
+      onDirtyTick();
+      if (game.running) scheduleDirtyTick();
+    }, getDirtyInterval());
   }
 
   // ===== タイマー =====
@@ -361,6 +403,7 @@
     } else if (game.timeLeft <= TIMER_WARNING_SEC) {
       dom.timer.classList.add('warning');
     }
+    updatePinchNotif();
     if (game.timeLeft <= 0) onTimeout();
   }
 
@@ -386,10 +429,22 @@
   }
 
   function activateZenkeshi() {
-    game.zenkeshiActive = true;
+    game.zenkeshiActive  = true;
+    game.zenkeshiCharged = false;
     dom.zenkeshiBtn.disabled = false;
     dom.zenkeshiBtn.classList.add('active');
+    dom.zenkeshiBtn.classList.remove('charged');
+    dom.zenkeshiBtn.querySelector('.zenkeshi-text').textContent = '全消し！ ' + ZENKESHI_DIRTY + 'マス';
     triggerAnimation(dom.gameGridWrap, 'area--flash', 600);
+
+    // 2秒後に強攻撃チャージ完了
+    zenkeshiChargeTimeout = setTimeout(function() {
+      if (game.zenkeshiActive) {
+        game.zenkeshiCharged = true;
+        dom.zenkeshiBtn.classList.add('charged');
+        dom.zenkeshiBtn.querySelector('.zenkeshi-text').textContent = '強ウォッシュ！ ' + ZENKESHI_DIRTY_CHARGE + 'マス';
+      }
+    }, ZENKESHI_CHARGE_MS);
 
     var remaining = Math.ceil(ZENKESHI_DURATION_MS / 1000);
     dom.zenkeshiTimerDisp.textContent = remaining + '秒';
@@ -406,24 +461,28 @@
   }
 
   function deactivateZenkeshi() {
-    game.zenkeshiActive = false;
+    game.zenkeshiActive  = false;
+    game.zenkeshiCharged = false;
     dom.zenkeshiBtn.disabled = true;
-    dom.zenkeshiBtn.classList.remove('active');
+    dom.zenkeshiBtn.classList.remove('active', 'charged');
+    dom.zenkeshiBtn.querySelector('.zenkeshi-text').textContent = '全消し！';
     dom.zenkeshiTimerDisp.textContent = '';
     clearInterval(zenkeshiCountdown);
     clearTimeout(zenkeshiTimeout);
-    zenkeshiCountdown = zenkeshiTimeout = null;
+    clearTimeout(zenkeshiChargeTimeout);
+    zenkeshiCountdown = zenkeshiTimeout = zenkeshiChargeTimeout = null;
   }
 
   function onZenkeshiPress() {
     if (!game.running || !game.zenkeshiActive) return;
+    var amount = game.zenkeshiCharged ? ZENKESHI_DIRTY_CHARGE : ZENKESHI_DIRTY;
     var evRef = db.ref('rooms/' + session.roomId + '/attackEvents').push();
     evRef.set({
       id:        evRef.key,
       from:      session.myRole,
       to:        session.oppRole,
       type:      'zenkeshi',
-      amount:    ZENKESHI_DIRTY,
+      amount:    amount,
       createdAt: firebase.database.ServerValue.TIMESTAMP,
     });
     deactivateZenkeshi();
@@ -585,6 +644,7 @@
       if (isDirty) dirty++;
     });
     dom.dirtySelf.textContent = dirty;
+    updatePinchNotif();
   }
 
   // ===== ユーティリティ =====
@@ -602,6 +662,26 @@
 
   function countDirty() {
     return game.tiles.filter(Boolean).length;
+  }
+
+  function getAdjacentIndices(index) {
+    var row = Math.floor(index / 4);
+    var col = index % 4;
+    var adj = [];
+    if (row > 0) adj.push(index - 4);
+    if (row < 3) adj.push(index + 4);
+    if (col > 0) adj.push(index - 1);
+    if (col < 3) adj.push(index + 1);
+    return adj;
+  }
+
+  function isPinchActive() {
+    return countDirty() >= PINCH_DIRTY_THRESHOLD && game.timeLeft <= PINCH_TIME_THRESHOLD;
+  }
+
+  function updatePinchNotif() {
+    var active = game.running && isPinchActive();
+    dom.pinchNotif.classList.toggle('pinch-notif--active', active);
   }
 
   function shuffle(arr) {
@@ -629,12 +709,13 @@
 
   function clearGameTimers() {
     clearInterval(timerInterval);
-    clearInterval(dirtyInterval);
+    clearTimeout(dirtyInterval);
     clearInterval(dirtySyncInterval);
     clearTimeout(zenkeshiTimeout);
     clearInterval(zenkeshiCountdown);
+    clearTimeout(zenkeshiChargeTimeout);
     timerInterval = dirtyInterval = dirtySyncInterval = null;
-    zenkeshiTimeout = zenkeshiCountdown = null;
+    zenkeshiTimeout = zenkeshiCountdown = zenkeshiChargeTimeout = null;
   }
 
   function detachAllListeners() {

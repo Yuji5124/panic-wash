@@ -749,6 +749,42 @@ body {
   margin-top: 10px;
 }
 
+/* ----- 強攻撃チャージ状態 ----- */
+.zenkeshi-btn.active.charged {
+  background: linear-gradient(135deg, #ff9800, #e65100);
+  border-color: #ffcc02;
+  animation: chargedGlow 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes chargedGlow {
+  from { box-shadow: 0 0 10px rgba(255, 152, 0, 0.7), 0 0 20px rgba(255, 152, 0, 0.4); }
+  to   { box-shadow: 0 0 22px rgba(255, 152, 0, 1.0), 0 0 44px rgba(255, 152, 0, 0.7); }
+}
+
+/* ----- ピンチ洗浄通知 ----- */
+.pinch-notif {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #ffd700;
+  min-height: 1.4em;
+  padding: 2px 0;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.pinch-notif--active { opacity: 1; }
+
+/* ピンチ洗浄チェーン発動タイルフラッシュ */
+@keyframes pinchChain {
+  0%   { box-shadow: 0 3px 0 #0288d1, 0 0 0 rgba(255,215,0,0); }
+  35%  { box-shadow: 0 3px 0 #0288d1, 0 0 20px 8px rgba(255,215,0,0.9); transform: scale(1.15); }
+  100% { box-shadow: 0 3px 0 #0288d1, 0 3px 6px rgba(0,0,0,0.3); transform: scale(1); }
+}
+.tile--pinch-chain {
+  animation: pinchChain 0.45s ease-out forwards;
+}
+
 /* ----- Phase 1 レスポンシブ ----- */
 @media (max-height: 620px) {
   .lobby-inner, .center-inner { gap: 10px; padding: 16px; }
