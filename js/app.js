@@ -23,7 +23,7 @@
     showFatalError('firebase-config.js が読み込めませんでした。<br>ファイルの配置を確認してください。');
     return;
   }
-  var _cfg = firebaseConfig;
+  var _cfg = window.firebaseConfig;
   var _missing = [];
   if (!_cfg.apiKey            || _cfg.apiKey.indexOf('YOUR')            !== -1) _missing.push('apiKey');
   if (!_cfg.databaseURL        || _cfg.databaseURL.indexOf('YOUR')       !== -1) _missing.push('databaseURL');
@@ -40,7 +40,7 @@
 
   var db;
   try {
-    firebase.initializeApp(firebaseConfig);
+    firebase.initializeApp(window.firebaseConfig);
     db = firebase.database();
   } catch (e) {
     showFatalError('Firebase 初期化エラー: ' + e.message);
