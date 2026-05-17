@@ -144,6 +144,9 @@ body {
   aspect-ratio: 1 / 1;
   border-radius: 10px;
   cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
   transition: transform 0.08s ease, box-shadow 0.08s ease, background-color 0.2s ease;
   position: relative;
   overflow: hidden;

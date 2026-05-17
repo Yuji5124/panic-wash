@@ -49,8 +49,8 @@
 
   // ===== バランス調整用定数（ここを変えるだけでゲーム感が変わる） =====
   var GAME_DURATION_SEC     = 60;    // 制限時間（秒）
-  var ZENKESHI_DIRTY        = 5;     // 全消し通常攻撃（マス）
-  var ZENKESHI_DIRTY_CHARGE = 7;     // 全消し強攻撃（マス）
+  var ZENKESHI_DIRTY        = 6;     // 全消し通常攻撃（マス）
+  var ZENKESHI_DIRTY_CHARGE = 8;     // 全消し強攻撃（マス）
   var ZENKESHI_CHARGE_MS    = 2000;  // 強攻撃チャージ時間（ms）
   var INITIAL_DIRTY         = 3;     // 開始時の初期汚れ数（マス）
   var ZENKESHI_DURATION_MS  = 5000;  // 全消しボタンの有効時間（ms）
@@ -58,7 +58,7 @@
   var PINCH_TIME_THRESHOLD  = 20;    // ピンチ洗浄が発動する残り時間（秒）
   var PINCH_CHAIN_CHANCE    = 0.20;  // ピンチ洗浄の連鎖確率
   // 汚れ発生間隔は getDirtyInterval() で段階管理
-  // 60〜41s: 2000ms / 40〜21s: 1700ms / 20〜11s: 1400ms / 10〜0s: 1100ms
+  // 60〜41s: 1800ms / 40〜21s: 1500ms / 20〜11s: 1200ms / 10〜0s: 900ms
 
   // ===== 内部定数（通常は変更不要） =====
   var GRID_SIZE            = 16;
@@ -345,6 +345,7 @@
       tile.className    = 'tile tile--clean';
       tile.dataset.index = i;
       tile.setAttribute('aria-label', 'マス' + (i + 1));
+      tile.setAttribute('tabindex', '-1');  // iOS focus-first タップ問題を防ぐ
       tile.addEventListener('pointerdown', onTilePointerDown);
       dom.gridSelf.appendChild(tile);
     }
@@ -379,10 +380,10 @@
 
   // ===== 汚れ発生間隔（段階式） =====
   function getDirtyInterval() {
-    if (game.timeLeft > 40) return 2000;
-    if (game.timeLeft > 20) return 1700;
-    if (game.timeLeft > 10) return 1400;
-    return 1100;
+    if (game.timeLeft > 40) return 1800;
+    if (game.timeLeft > 20) return 1500;
+    if (game.timeLeft > 10) return 1200;
+    return 900;
   }
 
   function scheduleDirtyTick() {
