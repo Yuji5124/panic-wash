@@ -1,356 +1,642 @@
 'use strict';
 
-// ===== Constants =====
-const GRID_SIZE = 16;          // 4×4
-const INITIAL_DIRTY = 3;       // 開始時の汚れマス数
-const DIRTY_INTERVAL_MS = 1500; // 汚れ追加間隔(ms)
-const ZENKESHI_DIRTY = 6;      // 全消し時に相手へ追加する汚れ数
-const ZENKESHI_DURATION_MS = 5000; // 全消しボタン有効時間(ms)
-const GAME_DURATION_SEC = 90;  // ゲーム時間(秒)
-const TIMER_WARNING_SEC = 15;  // 残り秒数警告閾値
+// ================================================================
+// パニックウォッシュ Phase 1 — Firebase Realtime Database 対戦版
+// ================================================================
 
-// ===== Game State =====
-let state = {
-  players: {
-    1: createPlayerState(),
-    2: createPlayerState(),
-  },
-  timeLeft: GAME_DURATION_SEC,
-  running: false,
-};
+(function main() {
 
-// interval / timeout IDs (リスタート時に解除)
-let timerInterval = null;
-let dirtyInterval = null;
-const zenkeshiTimeouts = { 1: null, 2: null };
-const zenkeshiCountdowns = { 1: null, 2: null };
+  // ===== Firebase 初期化 =====
+  function showFatalError(msg) {
+    document.body.innerHTML =
+      '<div style="padding:32px;color:#e94560;background:#1a1a2e;min-height:100vh;' +
+      'font-family:sans-serif;display:flex;flex-direction:column;justify-content:center">' +
+      '<h2 style="margin-bottom:16px">⚠ 設定エラー</h2>' +
+      '<p style="line-height:1.8">' + msg + '</p></div>';
+  }
 
-// ===== Player State Factory =====
-function createPlayerState() {
-  return {
-    tiles: new Array(GRID_SIZE).fill(false), // false=clean, true=dirty
+  if (typeof firebase === 'undefined') {
+    showFatalError('Firebase SDK が読み込めませんでした。<br>インターネット接続を確認してください。');
+    return;
+  }
+  if (!window.firebaseConfig || firebaseConfig.apiKey === 'YOUR_API_KEY') {
+    showFatalError('Firebase 設定が未入力です。<br><code>js/firebase-config.js</code> を編集してください。');
+    return;
+  }
+
+  var db;
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+  } catch (e) {
+    showFatalError('Firebase 初期化エラー: ' + e.message);
+    return;
+  }
+
+  // ===== 定数 =====
+  var GRID_SIZE            = 16;
+  var INITIAL_DIRTY        = 3;
+  var DIRTY_INTERVAL_MS    = 1800;
+  var ZENKESHI_DIRTY       = 5;
+  var ZENKESHI_DURATION_MS = 5000;
+  var GAME_DURATION_SEC    = 60;
+  var TIMER_WARNING_SEC    = 15;
+  var TIMER_DANGER_SEC     = 10;
+  var DIRTY_SYNC_MS        = 3000;  // Firebase への汚れ数同期間隔
+
+  // ===== セッション状態 =====
+  var session = { roomId: null, myRole: null, oppRole: null, startAt: null };
+
+  // ===== ゲーム状態（ローカルのみ） =====
+  var game = {
+    tiles:          [],
     zenkeshiActive: false,
+    timeLeft:       GAME_DURATION_SEC,
+    running:        false,
+    finished:       false,
   };
-}
 
-// ===== DOM References =====
-const dom = {
-  timer: document.getElementById('timer'),
-  grids: {
-    1: document.getElementById('grid-p1'),
-    2: document.getElementById('grid-p2'),
-  },
-  dirtyCounts: {
-    1: document.getElementById('dirty-p1'),
-    2: document.getElementById('dirty-p2'),
-  },
-  zenkeshiBtns: {
-    1: document.getElementById('zenkeshi-p1'),
-    2: document.getElementById('zenkeshi-p2'),
-  },
-  zenkeshiTimers: {
-    1: document.getElementById('zenkeshi-timer-p1'),
-    2: document.getElementById('zenkeshi-timer-p2'),
-  },
-  resultOverlay: document.getElementById('result-overlay'),
-  resultText: document.getElementById('result-text'),
-  restartBtn: document.getElementById('restart-btn'),
-  app: document.getElementById('app'),
-};
+  var processedAttackIds = {};   // 処理済み攻撃ID管理
+  var activeRefs         = [];   // Firebaseリスナー解除用
 
-// ===== Initialization =====
-function init() {
-  clearAllTimers();
+  // ===== タイマーID =====
+  var timerInterval      = null;
+  var dirtyInterval      = null;
+  var dirtySyncInterval  = null;
+  var zenkeshiTimeout    = null;
+  var zenkeshiCountdown  = null;
+  var timeoutFallback    = null;
 
-  state = {
-    players: {
-      1: createPlayerState(),
-      2: createPlayerState(),
+  // ===== DOM =====
+  var dom = {
+    screens: {
+      lobby:   document.getElementById('screen-lobby'),
+      waiting: document.getElementById('screen-waiting'),
+      ready:   document.getElementById('screen-ready'),
+      game:    document.getElementById('screen-game'),
+      result:  document.getElementById('screen-result'),
     },
-    timeLeft: GAME_DURATION_SEC,
-    running: true,
+    // Lobby
+    btnCreate:      document.getElementById('btn-create'),
+    inputRoomId:    document.getElementById('input-room-id'),
+    btnJoin:        document.getElementById('btn-join'),
+    lobbyError:     document.getElementById('lobby-error'),
+    // Waiting
+    displayRoomId:  document.getElementById('display-room-id'),
+    btnCopy:        document.getElementById('btn-copy'),
+    btnLeaveWaiting:document.getElementById('btn-leave-waiting'),
+    // Ready
+    readyRoomId:    document.getElementById('ready-room-id'),
+    badgeSelfName:  document.getElementById('badge-self-name'),
+    badgeOppName:   document.getElementById('badge-opp-name'),
+    badgeSelfReady: document.getElementById('badge-self-ready'),
+    badgeOppReady:  document.getElementById('badge-opp-ready'),
+    btnReady:       document.getElementById('btn-ready'),
+    btnLeaveReady:  document.getElementById('btn-leave-ready'),
+    // Game
+    timer:           document.getElementById('timer'),
+    dirtySelf:       document.getElementById('dirty-self'),
+    dirtyOpp:        document.getElementById('dirty-opp'),
+    roleBadge:       document.getElementById('role-badge'),
+    attackNotif:     document.getElementById('attack-notif'),
+    gridSelf:        document.getElementById('grid-self'),
+    gameGridWrap:    document.getElementById('game-grid-wrap'),
+    zenkeshiBtn:     document.getElementById('zenkeshi-btn'),
+    zenkeshiTimerDisp: document.getElementById('zenkeshi-timer-disp'),
+    // Result
+    resultContent:  document.getElementById('result-content'),
+    btnToLobby:     document.getElementById('btn-to-lobby'),
   };
 
-  dom.app.classList.remove('game-over');
-  dom.resultOverlay.classList.add('hidden');
-  dom.timer.textContent = GAME_DURATION_SEC;
-  dom.timer.classList.remove('warning');
-
-  buildGrid(1);
-  buildGrid(2);
-
-  // 初期汚れを配置
-  addRandomDirty(1, INITIAL_DIRTY);
-  addRandomDirty(2, INITIAL_DIRTY);
-
-  renderAll();
-
-  // メインタイマー
-  timerInterval = setInterval(onTimerTick, 1000);
-
-  // 汚れ追加インターバル
-  dirtyInterval = setInterval(onDirtyTick, DIRTY_INTERVAL_MS);
-}
-
-// ===== Grid Building =====
-function buildGrid(playerId) {
-  const grid = dom.grids[playerId];
-  grid.innerHTML = '';
-
-  for (let i = 0; i < GRID_SIZE; i++) {
-    const tile = document.createElement('button');
-    tile.className = 'tile tile--clean';
-    tile.dataset.index = i;
-    tile.dataset.player = playerId;
-    tile.setAttribute('aria-label', `Player${playerId} マス${i + 1}`);
-    tile.addEventListener('pointerdown', onTilePointerDown);
-    grid.appendChild(tile);
-  }
-}
-
-// ===== Tile Interaction =====
-function onTilePointerDown(e) {
-  e.preventDefault();
-  if (!state.running) return;
-
-  const tile = e.currentTarget;
-  const playerId = Number(tile.dataset.player);
-  const index = Number(tile.dataset.index);
-
-  if (!state.players[playerId].tiles[index]) return; // clean tile → nothing
-
-  // 汚れを消す
-  state.players[playerId].tiles[index] = false;
-
-  // 押し込み演出
-  tile.classList.add('pressed');
-  setTimeout(() => tile.classList.remove('pressed'), 100);
-
-  renderPlayer(playerId);
-  checkZenkeshi(playerId);
-}
-
-// ===== Timer Tick =====
-function onTimerTick() {
-  if (!state.running) return;
-
-  state.timeLeft -= 1;
-  dom.timer.textContent = state.timeLeft;
-
-  if (state.timeLeft <= TIMER_WARNING_SEC) {
-    dom.timer.classList.add('warning');
+  // ===== 画面切り替え =====
+  function showScreen(name) {
+    Object.keys(dom.screens).forEach(function(k) {
+      dom.screens[k].classList.remove('screen--active');
+    });
+    dom.screens[name].classList.add('screen--active');
   }
 
-  if (state.timeLeft <= 0) {
-    endGame('timeout');
+  // ===== ロビー =====
+  function onCreateRoom() {
+    var roomId = generateRoomId();
+    session.roomId  = roomId;
+    session.myRole  = 'player1';
+    session.oppRole = 'player2';
+
+    db.ref('rooms/' + roomId).set({
+      status:    'waiting',
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+      host:      'player1',
+      players: {
+        player1: { joined: true, ready: false, name: 'Player 1',
+                   dirtyCount: 0, alive: true, timedOut: false },
+      },
+    }).then(function() {
+      dom.displayRoomId.textContent = roomId;
+      showScreen('waiting');
+      listenForOpponentJoin(roomId);
+    }).catch(function(e) { showLobbyError('作成失敗: ' + e.message); });
   }
-}
 
-// ===== Dirty Tick =====
-function onDirtyTick() {
-  if (!state.running) return;
+  function onJoinRoom() {
+    var roomId = dom.inputRoomId.value.trim().toUpperCase();
+    if (roomId.length < 4) { showLobbyError('ルームIDを入力してください'); return; }
 
-  addRandomDirty(1, 1);
-  addRandomDirty(2, 1);
+    db.ref('rooms/' + roomId).once('value').then(function(snap) {
+      if (!snap.exists()) { showLobbyError('ルームが見つかりません'); return; }
+      var room = snap.val();
+      if (room.status === 'playing' || room.status === 'finished') {
+        showLobbyError('このルームはすでにゲーム中です'); return;
+      }
+      if (room.players && room.players.player2 && room.players.player2.joined) {
+        showLobbyError('このルームは満員です'); return;
+      }
 
-  renderAll();
-  checkLoseCondition(1);
-  checkLoseCondition(2);
-}
+      // トランザクションで player2 スロットを確保（競合防止）
+      db.ref('rooms/' + roomId + '/players/player2').transaction(function(cur) {
+        if (cur !== null) return; // abort
+        return { joined: true, ready: false, name: 'Player 2',
+                 dirtyCount: 0, alive: true, timedOut: false };
+      }).then(function(result) {
+        if (!result.committed) { showLobbyError('このルームは満員です'); return; }
+        session.roomId  = roomId;
+        session.myRole  = 'player2';
+        session.oppRole = 'player1';
+        db.ref('rooms/' + roomId + '/status').set('ready');
+        enterReadyScreen(roomId);
+      }).catch(function(e) { showLobbyError('参加失敗: ' + e.message); });
+    }).catch(function(e) { showLobbyError('エラー: ' + e.message); });
+  }
 
-// ===== Add Random Dirty Tiles =====
-function addRandomDirty(playerId, count) {
-  const tiles = state.players[playerId].tiles;
-  const cleanIndices = tiles
-    .map((dirty, i) => (!dirty ? i : null))
-    .filter(i => i !== null);
+  function showLobbyError(msg) {
+    dom.lobbyError.textContent = msg;
+    setTimeout(function() { dom.lobbyError.textContent = ''; }, 4000);
+  }
 
-  const toMark = shuffle(cleanIndices).slice(0, count);
+  function listenForOpponentJoin(roomId) {
+    var ref = db.ref('rooms/' + roomId + '/players/player2/joined');
+    var h = ref.on('value', function(snap) {
+      if (snap.val() === true) {
+        ref.off('value', h);
+        removeRef(ref);
+        enterReadyScreen(roomId);
+      }
+    });
+    activeRefs.push({ ref: ref, event: 'value', handler: h });
+  }
 
-  toMark.forEach(i => {
-    tiles[i] = true;
-  });
+  // ===== Ready 画面 =====
+  function enterReadyScreen(roomId) {
+    dom.readyRoomId.textContent   = roomId;
+    dom.badgeSelfName.textContent = session.myRole === 'player1' ? 'Player 1' : 'Player 2';
+    dom.badgeOppName.textContent  = session.myRole === 'player1' ? 'Player 2' : 'Player 1';
+    dom.badgeSelfReady.textContent = '待機中';
+    dom.badgeOppReady.textContent  = '待機中';
+    dom.badgeSelfReady.classList.remove('badge-status--ok');
+    dom.badgeOppReady.classList.remove('badge-status--ok');
+    dom.btnReady.disabled = false;
+    dom.btnReady.classList.remove('btn--done');
+    showScreen('ready');
 
-  // アニメーション用クラス付与
-  toMark.forEach(i => {
-    const tileEl = getTileElement(playerId, i);
-    if (tileEl) {
-      tileEl.classList.add('tile--dirty-new');
-      setTimeout(() => tileEl.classList.remove('tile--dirty-new'), 400);
+    // 相手の ready 状態を監視
+    var oppReadyRef = db.ref('rooms/' + roomId + '/players/' + session.oppRole + '/ready');
+    var h1 = oppReadyRef.on('value', function(snap) {
+      var ok = snap.val() === true;
+      dom.badgeOppReady.textContent = ok ? '準備OK ✓' : '待機中';
+      dom.badgeOppReady.classList.toggle('badge-status--ok', ok);
+    });
+    activeRefs.push({ ref: oppReadyRef, event: 'value', handler: h1 });
+
+    // status が playing になったらゲーム開始
+    var statusRef = db.ref('rooms/' + roomId + '/status');
+    var h2 = statusRef.on('value', function(snap) {
+      if (snap.val() === 'playing') {
+        detachAllListeners();
+        db.ref('rooms/' + roomId + '/startAt').once('value').then(function(s) {
+          session.startAt = s.val();
+          startGame();
+        });
+      }
+    });
+    activeRefs.push({ ref: statusRef, event: 'value', handler: h2 });
+  }
+
+  function onPressReady() {
+    dom.btnReady.disabled = true;
+    dom.btnReady.classList.add('btn--done');
+    dom.badgeSelfReady.textContent = '準備OK ✓';
+    dom.badgeSelfReady.classList.add('badge-status--ok');
+
+    var roomId = session.roomId;
+    db.ref('rooms/' + roomId + '/players/' + session.myRole + '/ready').set(true);
+
+    // player1 だけが startAt を書き込む責任を持つ
+    if (session.myRole === 'player1') {
+      watchBothReady(roomId);
     }
-  });
-}
-
-// ===== Zenkeshi Logic =====
-function checkZenkeshi(playerId) {
-  const tiles = state.players[playerId].tiles;
-  const allClean = tiles.every(d => !d);
-
-  if (allClean && !state.players[playerId].zenkeshiActive) {
-    activateZenkeshi(playerId);
   }
-}
 
-function activateZenkeshi(playerId) {
-  state.players[playerId].zenkeshiActive = true;
-  const btn = dom.zenkeshiBtns[playerId];
-  btn.disabled = false;
-  btn.classList.add('active');
+  function watchBothReady(roomId) {
+    var playersRef = db.ref('rooms/' + roomId + '/players');
+    var h = playersRef.on('value', function(snap) {
+      var p = snap.val() || {};
+      if (p.player1 && p.player1.ready && p.player2 && p.player2.ready) {
+        playersRef.off('value', h);
+        removeRef(playersRef);
+        var startAt = Date.now() + 1500;  // 1.5秒後にスタート
+        db.ref('rooms/' + roomId + '/startAt').set(startAt);
+        db.ref('rooms/' + roomId + '/status').set('playing');
+      }
+    });
+    activeRefs.push({ ref: playersRef, event: 'value', handler: h });
+  }
 
-  // カウントダウン表示
-  let remaining = Math.ceil(ZENKESHI_DURATION_MS / 1000);
-  updateZenkeshiTimer(playerId, remaining);
-  zenkeshiCountdowns[playerId] = setInterval(() => {
-    remaining -= 1;
-    if (remaining > 0) {
-      updateZenkeshiTimer(playerId, remaining);
+  // ===== ゲーム開始 =====
+  function startGame() {
+    clearGameTimers();
+    processedAttackIds = {};
+
+    game = {
+      tiles:          new Array(GRID_SIZE).fill(false),
+      zenkeshiActive: false,
+      timeLeft:       GAME_DURATION_SEC,
+      running:        false,
+      finished:       false,
+    };
+
+    dom.timer.textContent = GAME_DURATION_SEC;
+    dom.timer.classList.remove('warning', 'danger');
+    dom.roleBadge.textContent  = session.myRole === 'player1' ? 'P1' : 'P2';
+    dom.dirtyOpp.textContent   = '?';
+    dom.attackNotif.textContent = '';
+    dom.zenkeshiBtn.disabled   = true;
+    dom.zenkeshiBtn.classList.remove('active');
+    dom.zenkeshiTimerDisp.textContent = '';
+
+    buildGrid();
+    addRandomDirty(INITIAL_DIRTY);
+    renderGrid();
+
+    showScreen('game');
+
+    var delay = Math.max(0, session.startAt - Date.now());
+    setTimeout(function() {
+      game.running      = true;
+      timerInterval     = setInterval(onTimerTick, 1000);
+      dirtyInterval     = setInterval(onDirtyTick, DIRTY_INTERVAL_MS);
+      dirtySyncInterval = setInterval(syncDirtyCount, DIRTY_SYNC_MS);
+      listenAttackEvents();
+      listenOpponentStatus();
+    }, delay);
+  }
+
+  // ===== グリッド構築 =====
+  function buildGrid() {
+    dom.gridSelf.innerHTML = '';
+    for (var i = 0; i < GRID_SIZE; i++) {
+      var tile = document.createElement('button');
+      tile.className    = 'tile tile--clean';
+      tile.dataset.index = i;
+      tile.setAttribute('aria-label', 'マス' + (i + 1));
+      tile.addEventListener('pointerdown', onTilePointerDown);
+      dom.gridSelf.appendChild(tile);
+    }
+  }
+
+  function onTilePointerDown(e) {
+    e.preventDefault();
+    if (!game.running) return;
+    var tile  = e.currentTarget;
+    var index = Number(tile.dataset.index);
+    if (!game.tiles[index]) return;
+
+    game.tiles[index] = false;
+    tile.classList.add('pressed');
+    setTimeout(function() { tile.classList.remove('pressed'); }, 100);
+    renderGrid();
+    setTimeout(function() { triggerAnimation(tile, 'tile--sparkle', 380); }, 110);
+    checkZenkeshi();
+  }
+
+  // ===== タイマー =====
+  function onTimerTick() {
+    if (!game.running) return;
+    game.timeLeft -= 1;
+    dom.timer.textContent = game.timeLeft;
+    if (game.timeLeft <= TIMER_DANGER_SEC) {
+      dom.timer.classList.add('danger');
+    } else if (game.timeLeft <= TIMER_WARNING_SEC) {
+      dom.timer.classList.add('warning');
+    }
+    if (game.timeLeft <= 0) onTimeout();
+  }
+
+  // ===== 汚れ追加（自動） =====
+  function onDirtyTick() {
+    if (!game.running) return;
+    addRandomDirty(1);
+    renderGrid();
+    checkLoseCondition();
+  }
+
+  // ===== Firebase 汚れ数同期 =====
+  function syncDirtyCount() {
+    if (!game.running && !game.finished) return;
+    var count = countDirty();
+    db.ref('rooms/' + session.roomId + '/players/' + session.myRole + '/dirtyCount').set(count);
+  }
+
+  // ===== 全消し =====
+  function checkZenkeshi() {
+    var allClean = game.tiles.every(function(d) { return !d; });
+    if (allClean && !game.zenkeshiActive) activateZenkeshi();
+  }
+
+  function activateZenkeshi() {
+    game.zenkeshiActive = true;
+    dom.zenkeshiBtn.disabled = false;
+    dom.zenkeshiBtn.classList.add('active');
+    triggerAnimation(dom.gameGridWrap, 'area--flash', 600);
+
+    var remaining = Math.ceil(ZENKESHI_DURATION_MS / 1000);
+    dom.zenkeshiTimerDisp.textContent = remaining + '秒';
+    zenkeshiCountdown = setInterval(function() {
+      remaining -= 1;
+      if (remaining > 0) {
+        dom.zenkeshiTimerDisp.textContent = remaining + '秒';
+      } else {
+        clearInterval(zenkeshiCountdown);
+        zenkeshiCountdown = null;
+      }
+    }, 1000);
+    zenkeshiTimeout = setTimeout(deactivateZenkeshi, ZENKESHI_DURATION_MS);
+  }
+
+  function deactivateZenkeshi() {
+    game.zenkeshiActive = false;
+    dom.zenkeshiBtn.disabled = true;
+    dom.zenkeshiBtn.classList.remove('active');
+    dom.zenkeshiTimerDisp.textContent = '';
+    clearInterval(zenkeshiCountdown);
+    clearTimeout(zenkeshiTimeout);
+    zenkeshiCountdown = zenkeshiTimeout = null;
+  }
+
+  function onZenkeshiPress() {
+    if (!game.running || !game.zenkeshiActive) return;
+    var evRef = db.ref('rooms/' + session.roomId + '/attackEvents').push();
+    evRef.set({
+      id:        evRef.key,
+      from:      session.myRole,
+      to:        session.oppRole,
+      type:      'zenkeshi',
+      amount:    ZENKESHI_DIRTY,
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+    });
+    deactivateZenkeshi();
+  }
+
+  // ===== 攻撃イベント受信 =====
+  function listenAttackEvents() {
+    var ref = db.ref('rooms/' + session.roomId + '/attackEvents');
+    var h = ref.on('child_added', function(snap) {
+      var ev = snap.val();
+      if (!ev || ev.to !== session.myRole) return;
+      if (processedAttackIds[ev.id]) return;
+      processedAttackIds[ev.id] = true;
+      receiveAttack(ev.amount);
+    });
+    activeRefs.push({ ref: ref, event: 'child_added', handler: h });
+  }
+
+  function receiveAttack(amount) {
+    if (!game.running) return;
+    addRandomDirty(amount);
+    renderGrid();
+    triggerAnimation(dom.gridSelf, 'grid--shake', 500);
+    showAttackNotif();
+    checkLoseCondition();
+  }
+
+  function showAttackNotif() {
+    dom.attackNotif.textContent = '⚡攻撃！';
+    dom.attackNotif.classList.add('attack-notif--active');
+    setTimeout(function() {
+      dom.attackNotif.textContent = '';
+      dom.attackNotif.classList.remove('attack-notif--active');
+    }, 1800);
+  }
+
+  // ===== 相手状態監視 =====
+  function listenOpponentStatus() {
+    var ref = db.ref('rooms/' + session.roomId + '/players/' + session.oppRole);
+    var h = ref.on('value', function(snap) {
+      var d = snap.val() || {};
+      dom.dirtyOpp.textContent = (d.dirtyCount !== undefined) ? d.dirtyCount : '?';
+      if (d.alive === false && !game.finished) endGame('win', 'opponentLost');
+    });
+    activeRefs.push({ ref: ref, event: 'value', handler: h });
+  }
+
+  // ===== 負け判定 =====
+  function checkLoseCondition() {
+    if (!game.running) return;
+    var allDirty = game.tiles.every(function(d) { return d; });
+    if (allDirty) endGame('lose', 'fullDirty');
+  }
+
+  // ===== タイムアウト =====
+  function onTimeout() {
+    if (game.finished) return;
+    game.running = false;
+    clearGameTimers();
+
+    var myDirty = countDirty();
+    db.ref('rooms/' + session.roomId + '/players/' + session.myRole).update({
+      dirtyCount: myDirty,
+      timedOut:   true,
+    });
+
+    // 相手の timedOut を待って勝敗判定
+    var playersRef = db.ref('rooms/' + session.roomId + '/players');
+    var h = playersRef.on('value', function(snap) {
+      var p = snap.val() || {};
+      if (p[session.oppRole] && p[session.oppRole].timedOut === true) {
+        playersRef.off('value', h);
+        clearTimeout(timeoutFallback);
+        var myC   = p[session.myRole]  ? (p[session.myRole].dirtyCount  || 0) : 99;
+        var oppC  = p[session.oppRole] ? (p[session.oppRole].dirtyCount || 0) : 99;
+        if (myC < oppC)      endGame('win',  'timeup');
+        else if (myC > oppC) endGame('lose', 'timeup');
+        else                 endGame('draw', 'timeup');
+      }
+    });
+
+    // 相手が切断した場合の保険（5秒後）
+    timeoutFallback = setTimeout(function() {
+      playersRef.off('value', h);
+      if (!game.finished) endGame('win', 'timeup');
+    }, 5000);
+  }
+
+  // ===== ゲーム終了 =====
+  function endGame(outcome, reason) {
+    if (game.finished) return;
+    game.finished = true;
+    game.running  = false;
+    clearGameTimers();
+    clearTimeout(timeoutFallback);
+    detachAllListeners();
+
+    if (outcome === 'lose') {
+      db.ref('rooms/' + session.roomId + '/players/' + session.myRole + '/alive').set(false);
+    }
+
+    var html = '';
+    if (outcome === 'win') {
+      html = '<div class="result-win">勝利！</div>' +
+             '<p class="result-sub">' + reasonLabel(reason) + '</p>';
+    } else if (outcome === 'lose') {
+      html = '<div class="result-lose">敗北…</div>' +
+             '<p class="result-sub">' + reasonLabel(reason) + '</p>';
     } else {
-      clearInterval(zenkeshiCountdowns[playerId]);
-      zenkeshiCountdowns[playerId] = null;
+      html = '<div class="result-draw">引き分け</div>' +
+             '<p class="result-sub">汚れ数が同じでした</p>';
     }
-  }, 1000);
-
-  // 5秒後に無効化
-  zenkeshiTimeouts[playerId] = setTimeout(() => {
-    deactivateZenkeshi(playerId);
-  }, ZENKESHI_DURATION_MS);
-}
-
-function deactivateZenkeshi(playerId) {
-  state.players[playerId].zenkeshiActive = false;
-  const btn = dom.zenkeshiBtns[playerId];
-  btn.disabled = true;
-  btn.classList.remove('active');
-  updateZenkeshiTimer(playerId, '');
-
-  clearInterval(zenkeshiCountdowns[playerId]);
-  zenkeshiCountdowns[playerId] = null;
-  zenkeshiTimeouts[playerId] = null;
-}
-
-function updateZenkeshiTimer(playerId, value) {
-  dom.zenkeshiTimers[playerId].textContent = value ? `${value}秒` : '';
-}
-
-function onZenkeshiPress(playerId) {
-  if (!state.running) return;
-  if (!state.players[playerId].zenkeshiActive) return;
-
-  const opponentId = playerId === 1 ? 2 : 1;
-
-  // 相手に6マス汚れを追加
-  addRandomDirty(opponentId, ZENKESHI_DIRTY);
-  renderPlayer(opponentId);
-  checkLoseCondition(opponentId);
-
-  deactivateZenkeshi(playerId);
-
-  // タイムアウトのキャンセル
-  clearTimeout(zenkeshiTimeouts[playerId]);
-  zenkeshiTimeouts[playerId] = null;
-}
-
-// ===== Lose Condition =====
-function checkLoseCondition(playerId) {
-  if (!state.running) return;
-  const tiles = state.players[playerId].tiles;
-  const allDirty = tiles.every(d => d);
-  if (allDirty) {
-    endGame('fullDirty', playerId);
+    dom.resultContent.innerHTML = html;
+    showScreen('result');
   }
-}
 
-// ===== End Game =====
-function endGame(reason, loserPlayerId) {
-  state.running = false;
-  clearAllTimers();
-  dom.app.classList.add('game-over');
+  function reasonLabel(r) {
+    if (r === 'fullDirty')    return '盤面が全部汚れてしまいました';
+    if (r === 'opponentLost') return '相手の盤面が全部汚れました';
+    if (r === 'timeup')       return '60秒経過 — 汚れ数で判定';
+    return '';
+  }
 
-  let message = '';
+  // ===== 退室 =====
+  function leaveRoom() {
+    clearGameTimers();
+    clearTimeout(timeoutFallback);
+    detachAllListeners();
 
-  if (reason === 'fullDirty') {
-    const winnerId = loserPlayerId === 1 ? 2 : 1;
-    message = buildWinMessage(winnerId);
-  } else if (reason === 'timeout') {
-    const dirty1 = countDirty(1);
-    const dirty2 = countDirty(2);
+    if (session.roomId && session.myRole) {
+      if (session.myRole === 'player1') {
+        db.ref('rooms/' + session.roomId).remove();
+      } else {
+        db.ref('rooms/' + session.roomId + '/players/player2').remove();
+        db.ref('rooms/' + session.roomId + '/status').set('waiting');
+      }
+    }
 
-    if (dirty1 < dirty2) {
-      message = buildWinMessage(1);
-    } else if (dirty2 < dirty1) {
-      message = buildWinMessage(2);
+    session = { roomId: null, myRole: null, oppRole: null, startAt: null };
+    game.finished = true;
+    dom.lobbyError.textContent = '';
+    dom.inputRoomId.value = '';
+    showScreen('lobby');
+  }
+
+  // ===== レンダリング =====
+  function renderGrid() {
+    var els = dom.gridSelf.querySelectorAll('.tile');
+    var dirty = 0;
+    els.forEach(function(el, i) {
+      var isDirty = game.tiles[i];
+      el.classList.toggle('tile--dirty', isDirty);
+      el.classList.toggle('tile--clean', !isDirty);
+      if (isDirty) dirty++;
+    });
+    dom.dirtySelf.textContent = dirty;
+  }
+
+  // ===== ユーティリティ =====
+  function addRandomDirty(count) {
+    var cleanIdx = game.tiles
+      .map(function(d, i) { return !d ? i : null; })
+      .filter(function(i) { return i !== null; });
+    var toMark = shuffle(cleanIdx).slice(0, count);
+    toMark.forEach(function(i) {
+      game.tiles[i] = true;
+      var el = dom.gridSelf.querySelector('[data-index="' + i + '"]');
+      if (el) triggerAnimation(el, 'tile--dirty-new', 400);
+    });
+  }
+
+  function countDirty() {
+    return game.tiles.filter(Boolean).length;
+  }
+
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+    }
+    return a;
+  }
+
+  function triggerAnimation(el, cls, dur) {
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    setTimeout(function() { el.classList.remove(cls); }, dur);
+  }
+
+  function generateRoomId() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    var id = '';
+    for (var i = 0; i < 6; i++) id += chars[Math.floor(Math.random() * chars.length)];
+    return id;
+  }
+
+  function clearGameTimers() {
+    clearInterval(timerInterval);
+    clearInterval(dirtyInterval);
+    clearInterval(dirtySyncInterval);
+    clearTimeout(zenkeshiTimeout);
+    clearInterval(zenkeshiCountdown);
+    timerInterval = dirtyInterval = dirtySyncInterval = null;
+    zenkeshiTimeout = zenkeshiCountdown = null;
+  }
+
+  function detachAllListeners() {
+    activeRefs.forEach(function(entry) {
+      entry.ref.off(entry.event, entry.handler);
+    });
+    activeRefs = [];
+  }
+
+  function removeRef(ref) {
+    activeRefs = activeRefs.filter(function(e) { return e.ref !== ref; });
+  }
+
+  // ===== イベントリスナー =====
+  dom.btnCreate.addEventListener('click', onCreateRoom);
+  dom.btnJoin.addEventListener('click', onJoinRoom);
+  dom.inputRoomId.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') onJoinRoom();
+  });
+  dom.inputRoomId.addEventListener('input', function() {
+    dom.inputRoomId.value = dom.inputRoomId.value.toUpperCase();
+  });
+  dom.btnCopy.addEventListener('click', function() {
+    var id = session.roomId || dom.displayRoomId.textContent;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(id).then(function() {
+        dom.btnCopy.textContent = 'コピー済み✓';
+        setTimeout(function() { dom.btnCopy.textContent = 'コピー'; }, 2000);
+      });
     } else {
-      message = '<span class="draw">引き分け！</span>\n同点です';
+      dom.btnCopy.textContent = id;  // fallback: select manually
     }
-  }
-
-  dom.resultText.innerHTML = message;
-  dom.resultOverlay.classList.remove('hidden');
-}
-
-function buildWinMessage(winnerId) {
-  return `<span class="winner">Player ${winnerId}\n勝利！</span>`;
-}
-
-// ===== Render =====
-function renderAll() {
-  renderPlayer(1);
-  renderPlayer(2);
-}
-
-function renderPlayer(playerId) {
-  const tiles = state.players[playerId].tiles;
-  const grid = dom.grids[playerId];
-  const tileEls = grid.querySelectorAll('.tile');
-  let dirtyCount = 0;
-
-  tileEls.forEach((el, i) => {
-    const isDirty = tiles[i];
-    el.classList.toggle('tile--dirty', isDirty);
-    el.classList.toggle('tile--clean', !isDirty);
-    if (isDirty) dirtyCount++;
   });
+  dom.btnLeaveWaiting.addEventListener('click', leaveRoom);
+  dom.btnLeaveReady.addEventListener('click', leaveRoom);
+  dom.btnReady.addEventListener('click', onPressReady);
+  dom.zenkeshiBtn.addEventListener('click', onZenkeshiPress);
+  dom.btnToLobby.addEventListener('click', leaveRoom);
 
-  dom.dirtyCounts[playerId].textContent = dirtyCount;
-}
+  // ===== 起動 =====
+  showScreen('lobby');
 
-// ===== Utilities =====
-function getTileElement(playerId, index) {
-  return dom.grids[playerId].querySelector(`[data-index="${index}"]`);
-}
-
-function countDirty(playerId) {
-  return state.players[playerId].tiles.filter(Boolean).length;
-}
-
-function shuffle(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function clearAllTimers() {
-  clearInterval(timerInterval);
-  clearInterval(dirtyInterval);
-  timerInterval = null;
-  dirtyInterval = null;
-
-  [1, 2].forEach(id => {
-    clearTimeout(zenkeshiTimeouts[id]);
-    clearInterval(zenkeshiCountdowns[id]);
-    zenkeshiTimeouts[id] = null;
-    zenkeshiCountdowns[id] = null;
-  });
-}
-
-// ===== Event Listeners =====
-dom.restartBtn.addEventListener('click', init);
-
-dom.zenkeshiBtns[1].addEventListener('click', () => onZenkeshiPress(1));
-dom.zenkeshiBtns[2].addEventListener('click', () => onZenkeshiPress(2));
-
-// ===== Start =====
-init();
+})(); // end main

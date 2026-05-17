@@ -209,6 +209,53 @@ body {
   animation: dirtyAppear 0.3s ease forwards;
 }
 
+/* ===== FX: Zenkeshi activation — inset glow on player area ===== */
+@keyframes areaFlash {
+  0%   { box-shadow: none; }
+  20%  { box-shadow: inset 0 0 0 4px rgba(233, 69, 96, 1), 0 0 28px rgba(233, 69, 96, 0.7); }
+  100% { box-shadow: none; }
+}
+
+.area--flash {
+  animation: areaFlash 0.55s ease-out forwards;
+}
+
+/* ===== FX: Attack received — grid shake ===== */
+@keyframes gridShake {
+  0%, 100% { transform: translateX(0); }
+  16%      { transform: translateX(-8px); }
+  33%      { transform: translateX(8px); }
+  50%      { transform: translateX(-5px); }
+  66%      { transform: translateX(5px); }
+  83%      { transform: translateX(-2px); }
+}
+
+.grid--shake {
+  animation: gridShake 0.42s ease-out forwards;
+}
+
+/* ===== FX: Tile cleaned — sparkle ===== */
+@keyframes tileSparkle {
+  0%   { box-shadow: 0 3px 0 #0288d1, 0 3px 6px rgba(0,0,0,0.3); }
+  40%  { box-shadow: 0 3px 0 #0288d1, 0 0 14px 5px rgba(255, 255, 160, 0.9); transform: scale(1.1); }
+  100% { box-shadow: 0 3px 0 #0288d1, 0 3px 6px rgba(0,0,0,0.3); transform: scale(1); }
+}
+
+.tile--sparkle {
+  animation: tileSparkle 0.35s ease-out forwards;
+}
+
+/* ===== FX: Timer danger (≤10s) — overrides warning ===== */
+@keyframes timerDanger {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.3); opacity: 0.8; }
+}
+
+.timer-value.danger {
+  color: #ff1744;
+  animation: timerDanger 0.35s ease-in-out infinite;
+}
+
 /* ===== Divider ===== */
 .divider {
   display: flex;
@@ -364,6 +411,359 @@ body {
   pointer-events: none;
 }
 
+/* ================================================================
+   Phase 1 — 画面切り替え・ロビー・待機・Ready・1人用ゲーム
+   ================================================================ */
+
+/* ----- Screen 管理 ----- */
+.screen {
+  display: none;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+.screen--active {
+  display: flex;
+}
+
+/* ----- 共通センタリングラッパー ----- */
+.center-inner,
+.lobby-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 20px;
+  max-width: 400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ----- タイトルロゴ ----- */
+.title-logo {
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #e94560;
+  text-align: center;
+}
+.subtitle {
+  font-size: 0.82rem;
+  color: #aaa;
+  margin-top: -8px;
+}
+
+/* ----- 汎用ボタン ----- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 28px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  transition: transform 0.1s ease, opacity 0.15s ease;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.95); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn--primary {
+  background: linear-gradient(135deg, #e94560, #c62a47);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(233, 69, 96, 0.4);
+}
+.btn--secondary {
+  background: #0f3460;
+  color: #fff;
+  border: 2px solid #4fc3f7;
+}
+.btn--ghost {
+  background: transparent;
+  color: #888;
+  font-size: 0.82rem;
+  font-weight: 400;
+  padding: 8px 16px;
+  text-decoration: underline;
+}
+.btn--lg { width: 100%; max-width: 320px; padding: 16px; font-size: 1.05rem; }
+.btn--copy {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  background: #0f3460;
+  color: #4fc3f7;
+  border: 1px solid #4fc3f7;
+  border-radius: 6px;
+}
+.btn--done {
+  background: #1e3a1e;
+  color: #4caf50;
+  box-shadow: none;
+}
+
+/* ----- ロビー ----- */
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+  color: #555;
+  font-size: 0.78rem;
+}
+.or-divider::before,
+.or-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #333;
+}
+
+.join-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+}
+.room-input {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 2px solid #333;
+  background: #16213e;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  outline: none;
+}
+.room-input:focus { border-color: #4fc3f7; }
+
+.error-msg {
+  min-height: 1.2em;
+  color: #e94560;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+/* ----- 待機画面 ----- */
+.room-id-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #16213e;
+  border: 2px solid #0f3460;
+  border-radius: 14px;
+  padding: 16px 20px;
+}
+.room-id-text {
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  color: #4fc3f7;
+}
+.screen-label {
+  font-size: 0.75rem;
+  color: #888;
+}
+.room-id-inline {
+  font-weight: 700;
+  color: #4fc3f7;
+  letter-spacing: 0.1em;
+}
+.hint-text {
+  font-size: 0.8rem;
+  color: #888;
+  text-align: center;
+}
+.waiting-msg {
+  font-size: 0.88rem;
+  color: #ccc;
+}
+
+/* Spinner */
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 4px solid #333;
+  border-top-color: #4fc3f7;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ----- Ready 画面 ----- */
+.ready-heading {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f0f0f0;
+  text-align: center;
+}
+.badge-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 320px;
+}
+.player-badge {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 10px;
+  background: #16213e;
+  border: 2px solid #0f3460;
+  border-radius: 12px;
+}
+.badge-role {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #a0c4ff;
+}
+.badge-status {
+  font-size: 0.72rem;
+  color: #888;
+  transition: color 0.2s;
+}
+.badge-status--ok {
+  color: #4caf50;
+  font-weight: 700;
+}
+.badge-vs {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #e94560;
+}
+
+/* ----- ゲーム画面（1人用） ----- */
+#screen-game .game-header {
+  padding: 6px 14px;
+  justify-content: space-between;
+}
+.role-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #a0c4ff;
+  background: #16213e;
+  border: 1px solid #0f3460;
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+/* 相手情報バー */
+.opp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 14px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  gap: 8px;
+}
+.opp-name {
+  color: #888;
+  font-weight: 700;
+}
+.opp-dirty-wrap { color: #ccc; }
+.opp-val { color: #c97b3a; font-weight: 700; }
+
+/* 攻撃通知 */
+.attack-notif {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #e94560;
+  min-width: 5em;
+  text-align: right;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.attack-notif--active { opacity: 1; }
+
+/* グリッドラッパー（1人用・大きめ） */
+.game-grid-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 6px 0;
+}
+#screen-game .grid {
+  width: min(92vw, 360px);
+  gap: 6px;
+  padding: 0;
+}
+
+/* 全消しボタン配置 */
+.zenkeshi-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 14px 12px;
+  flex-shrink: 0;
+}
+#screen-game .zenkeshi-btn {
+  width: min(92vw, 360px);
+  padding: 10px 16px;
+  font-size: 0.88rem;
+}
+
+/* ----- 結果画面 ----- */
+.result-content {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.result-win {
+  font-size: 3rem;
+  font-weight: 900;
+  color: #ffd700;
+  animation: resultAppear 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.result-lose {
+  font-size: 3rem;
+  font-weight: 900;
+  color: #e94560;
+  animation: resultAppear 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.result-draw {
+  font-size: 2.6rem;
+  font-weight: 900;
+  color: #a0c4ff;
+  animation: resultAppear 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.result-sub {
+  font-size: 0.85rem;
+  color: #aaa;
+  margin-top: 10px;
+}
+
+/* ----- Phase 1 レスポンシブ ----- */
+@media (max-height: 620px) {
+  .lobby-inner, .center-inner { gap: 10px; padding: 16px; }
+  .title-logo { font-size: 1.3rem; }
+  .ready-heading { font-size: 0.95rem; }
+  #screen-game .grid { width: min(88vw, 300px); gap: 5px; }
+  .result-win, .result-lose, .result-draw { font-size: 2.2rem; }
+}
+@media (max-width: 375px) {
+  .room-id-text { font-size: 1.6rem; letter-spacing: 0.14em; }
+  #screen-game .grid { width: min(94vw, 320px); }
+  #screen-game .zenkeshi-btn { width: min(94vw, 320px); }
+}
+
+/* ----- Phase 0 レスポンシブ（既存画面向け・残置） ----- */
 /* Responsive: short screens (e.g. older iPhones) */
 @media (max-height: 620px) {
   .game-title { font-size: 0.75rem; }

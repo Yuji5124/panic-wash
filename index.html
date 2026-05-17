@@ -7,61 +7,114 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div id="app">
-    <header class="game-header">
-      <h1 class="game-title">パニックウォッシュ</h1>
-      <div class="timer-wrap">
-        <span class="timer-label">残り</span>
-        <span id="timer" class="timer-value">90</span>
-        <span class="timer-label">秒</span>
-      </div>
-    </header>
+<div id="app">
 
-    <!-- Player 2 (上側・逆向き表示) -->
-    <section class="player-area" id="area-p2" data-player="2">
-      <div class="player-header">
-        <span class="player-label">Player 2</span>
-        <div class="player-info">
-          <span class="dirty-count-label">汚れ: <span id="dirty-p2" class="dirty-count">0</span></span>
-        </div>
-        <button class="zenkeshi-btn" id="zenkeshi-p2" disabled>
-          <span class="zenkeshi-text">全消し！</span>
-          <span class="zenkeshi-timer" id="zenkeshi-timer-p2"></span>
-        </button>
-      </div>
-      <div class="grid" id="grid-p2"></div>
-    </section>
+  <!-- ===== Screen: Lobby ===== -->
+  <div id="screen-lobby" class="screen">
+    <div class="lobby-inner">
+      <h1 class="title-logo">パニックウォッシュ</h1>
+      <p class="subtitle">リアルタイム2人対戦</p>
 
-    <div class="divider">
-      <div class="divider-line"></div>
-      <span class="divider-label">VS</span>
-      <div class="divider-line"></div>
-    </div>
+      <button id="btn-create" class="btn btn--primary btn--lg">ルームを作る</button>
 
-    <!-- Player 1 (下側・正向き表示) -->
-    <section class="player-area" id="area-p1" data-player="1">
-      <div class="grid" id="grid-p1"></div>
-      <div class="player-header player-header--bottom">
-        <span class="player-label">Player 1</span>
-        <div class="player-info">
-          <span class="dirty-count-label">汚れ: <span id="dirty-p1" class="dirty-count">0</span></span>
-        </div>
-        <button class="zenkeshi-btn" id="zenkeshi-p1" disabled>
-          <span class="zenkeshi-text">全消し！</span>
-          <span class="zenkeshi-timer" id="zenkeshi-timer-p1"></span>
-        </button>
-      </div>
-    </section>
+      <div class="or-divider"><span>または</span></div>
 
-    <!-- 結果オーバーレイ -->
-    <div id="result-overlay" class="result-overlay hidden">
-      <div class="result-box">
-        <p id="result-text" class="result-text"></p>
-        <button id="restart-btn" class="restart-btn">リスタート</button>
+      <div class="join-row">
+        <input id="input-room-id" class="room-input" type="text"
+               placeholder="ルームID" maxlength="6"
+               autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button id="btn-join" class="btn btn--secondary">参加</button>
       </div>
+
+      <p id="lobby-error" class="error-msg"></p>
     </div>
   </div>
 
-  <script src="js/app.js"></script>
+  <!-- ===== Screen: Waiting ===== -->
+  <div id="screen-waiting" class="screen">
+    <div class="center-inner">
+      <p class="screen-label">ルームID</p>
+      <div class="room-id-card">
+        <span id="display-room-id" class="room-id-text"></span>
+        <button id="btn-copy" class="btn btn--copy">コピー</button>
+      </div>
+      <p class="hint-text">このIDを相手に共有してください</p>
+      <div class="spinner"></div>
+      <p class="waiting-msg">相手の参加を待っています…</p>
+      <button id="btn-leave-waiting" class="btn btn--ghost">退出</button>
+    </div>
+  </div>
+
+  <!-- ===== Screen: Ready ===== -->
+  <div id="screen-ready" class="screen">
+    <div class="center-inner">
+      <p class="screen-label">ルームID: <span id="ready-room-id" class="room-id-inline"></span></p>
+      <h2 class="ready-heading">対戦相手が見つかりました！</h2>
+      <div class="badge-row">
+        <div class="player-badge" id="badge-self">
+          <span class="badge-role" id="badge-self-name"></span>
+          <span class="badge-status" id="badge-self-ready">待機中</span>
+        </div>
+        <div class="badge-vs">VS</div>
+        <div class="player-badge" id="badge-opp">
+          <span class="badge-role" id="badge-opp-name"></span>
+          <span class="badge-status" id="badge-opp-ready">待機中</span>
+        </div>
+      </div>
+      <button id="btn-ready" class="btn btn--primary btn--lg">準備OK！</button>
+      <button id="btn-leave-ready" class="btn btn--ghost">退出</button>
+    </div>
+  </div>
+
+  <!-- ===== Screen: Game ===== -->
+  <div id="screen-game" class="screen">
+    <!-- Header -->
+    <header class="game-header">
+      <span class="role-badge" id="role-badge"></span>
+      <div class="timer-wrap">
+        <span class="timer-label">残り</span>
+        <span id="timer" class="timer-value">60</span>
+        <span class="timer-label">秒</span>
+      </div>
+      <span class="dirty-count-label">汚れ: <span id="dirty-self" class="dirty-count">0</span></span>
+    </header>
+
+    <!-- Opponent info bar -->
+    <div class="opp-bar">
+      <span class="opp-name" id="opp-name-label">相手</span>
+      <span class="opp-dirty-wrap">汚れ: <span id="dirty-opp" class="dirty-count opp-val">?</span></span>
+      <span id="attack-notif" class="attack-notif"></span>
+    </div>
+
+    <!-- Grid area -->
+    <div class="game-grid-wrap" id="game-grid-wrap">
+      <div class="grid" id="grid-self"></div>
+    </div>
+
+    <!-- Zenkeshi -->
+    <div class="zenkeshi-wrap">
+      <button class="zenkeshi-btn" id="zenkeshi-btn" disabled>
+        <span class="zenkeshi-text">全消し！</span>
+        <span class="zenkeshi-timer" id="zenkeshi-timer-disp"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Screen: Result ===== -->
+  <div id="screen-result" class="screen">
+    <div class="center-inner">
+      <div id="result-content" class="result-content"></div>
+      <button id="btn-to-lobby" class="btn btn--primary btn--lg">ロビーへ戻る</button>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<!-- Firebase SDK (compat, no build tools needed) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script src="js/firebase-config.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

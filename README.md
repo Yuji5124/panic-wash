@@ -1,4 +1,6 @@
-# パニックウォッシュ — Phase 0
+# パニックウォッシュ — Phase 1（Firebase対戦版）
+
+> Phase 0（同一端末ローカル版）の仕様は本ドキュメント下部に残してあります。
 
 2人対戦型ポチポチパズルゲームの試作版（同一端末・Firebase なし）。
 
@@ -10,9 +12,9 @@
 2. Player 1 は画面下側、Player 2 は画面上側（逆向き）を操作する
 3. 汚れた茶色のマス（💩）をタップして消す
 4. 消し続けて **16マスすべてきれいにする** と「全消し！」ボタンが 5 秒間光る
-5. 光っている間にボタンを押すと **相手の盤面に 6 マス汚れを追加** できる
+5. 光っている間にボタンを押すと **相手の盤面に 5 マス汚れを追加** できる
 6. 自分の盤面が **16 マス全部汚れたら負け**
-7. 90 秒経過したときは **汚れマスが少ない方の勝ち**（同数なら引き分け）
+7. 60 秒経過したときは **汚れマスが少ない方の勝ち**（同数なら引き分け）
 8. 「リスタート」ボタンでいつでも再スタートできる
 
 ---
@@ -62,16 +64,27 @@ python -m http.server 8080
 | `addRandomDirty(playerId, count)` | ランダムにクリーンマスを汚す |
 | `onTilePointerDown(e)` | タップで汚れを消す |
 | `onTimerTick()` | 1 秒ごとのカウントダウン |
-| `onDirtyTick()` | 1.5 秒ごとの汚れ追加 |
+| `onDirtyTick()` | 1.8 秒ごとの汚れ追加 |
 | `checkZenkeshi(playerId)` | 全消し条件チェック・ボタン有効化 |
 | `activateZenkeshi(playerId)` | 全消しボタンを 5 秒有効化 |
 | `deactivateZenkeshi(playerId)` | 全消しボタンを無効化 |
-| `onZenkeshiPress(playerId)` | 全消し実行・相手へ 6 マス追加 |
+| `onZenkeshiPress(playerId)` | 全消し実行・相手へ 5 マス追加 |
 | `checkLoseCondition(playerId)` | 16 マス全汚れ→敗北判定 |
 | `endGame(reason, loserPlayerId)` | 勝敗確定・結果表示 |
 | `renderPlayer(playerId)` | タイル DOM を状態に同期 |
 | `clearAllTimers()` | 全 interval/timeout を解除 |
 | `shuffle(arr)` | Fisher-Yates シャッフル |
+
+### バランス値（Phase 0 現在）
+
+| 定数 | 値 | 説明 |
+|---|---|---|
+| `GAME_DURATION_SEC` | 60 秒 | 制限時間 |
+| `DIRTY_INTERVAL_MS` | 1800 ms | 汚れ自動追加間隔 |
+| `INITIAL_DIRTY` | 3 マス | 開始時の初期汚れ数 |
+| `ZENKESHI_DIRTY` | 5 マス | 全消し攻撃で追加する汚れ数 |
+| `ZENKESHI_DURATION_MS` | 5000 ms | 全消しボタンの有効時間 |
+| `TIMER_WARNING_SEC` | 15 秒 | タイマー警告（赤点滅）開始秒数 |
 
 ### タイマー管理
 
@@ -89,23 +102,118 @@ python -m http.server 8080
 
 ---
 
-## 次フェーズ：Firebase 対応予定
+---
 
-Phase 1 では Firebase を使ったオンライン対戦に拡張予定。
+## Phase 1 — Firebase 対戦版
 
-### 予定する変更
+### 概要
 
-- **Firebase Realtime Database** でゲーム状態をリアルタイム同期
-- ルームコード方式（4 桁）でマッチング
-- 各プレイヤーが別端末で自分の盤面だけを操作
-- Player 2 の `rotate(180deg)` を解除し、各自正向きで表示
-- オフライン検知・再接続処理
-- 任意：ランキング・勝率記録（Firestore）
+2台のスマホで別々に接続し、ルームIDを共有して対戦します。
+**グリッド状態はローカル管理**し、Firebase には最小限の情報だけ同期します。
 
-### 移行時の主な作業
+### Firebase Realtime Database セットアップ
 
-1. `firebase.js` を追加して SDK を初期化
-2. `app.js` の `state` を Realtime Database の参照に置き換え
-3. `onTilePointerDown` でローカル更新 → DB 書き込みに変更
-4. `onValue` リスナーで相手の盤面変更を受信して描画
-5. ルーム管理ロジック（作成・参加・退室）を追加
+1. [Firebase Console](https://console.firebase.google.com/) でプロジェクトを作成
+2. Realtime Database を作成（ロケーション: `asia-southeast1` 推奨）
+3. **ルール**を以下の開発用設定に変更
+
+```json
+{
+  "rules": {
+    ".read": true,
+    ".write": true
+  }
+}
+```
+
+> ⚠ 上記は開発・テスト用です。本番では認証付きルールに変更してください。
+
+4. Firebase Console > プロジェクト設定 > マイアプリ > SDK の設定と構成 から設定値を取得
+
+### `js/firebase-config.js` の編集
+
+```js
+const firebaseConfig = {
+  apiKey:            "取得した値",
+  authDomain:        "your-project.firebaseapp.com",
+  databaseURL:       "https://your-project-default-rtdb.firebaseio.com",
+  projectId:         "your-project",
+  storageBucket:     "your-project.appspot.com",
+  messagingSenderId: "123456789",
+  appId:             "1:123:web:abc"
+};
+```
+
+### GitHub Pages での公開手順
+
+```bash
+git add .
+git commit -m "Phase 1: Firebase対戦版"
+git push origin main
+# GitHub > Settings > Pages > Branch: main / root で公開
+```
+
+`index.html` を直接開く場合も動作します（`file://` でOK）。
+
+### ルーム作成・参加方法
+
+| 操作 | 手順 |
+|---|---|
+| ルーム作成 | 「ルームを作る」を押す → 6文字のルームIDが表示される |
+| ID共有 | 「コピー」ボタンでIDをコピーし、相手に送る |
+| ルーム参加 | IDを入力欄に貼り付け→「参加」を押す |
+| ゲーム開始 | 両者が「準備OK！」を押すと自動でカウントダウン後スタート |
+
+### Firebase 同期情報
+
+| 情報 | 同期タイミング |
+|---|---|
+| `players/{role}/joined` | 参加時に書き込み |
+| `players/{role}/ready` | 準備OK押下時 |
+| `startAt` | player1 が両者 ready を確認して書き込み |
+| `attackEvents/{id}` | 全消しボタン押下時にプッシュ |
+| `players/{role}/dirtyCount` | 3秒ごと・タイムアウト時に書き込み |
+| `players/{role}/alive` | 敗北時に `false` を書き込み |
+| `players/{role}/timedOut` | 60秒タイムアウト時に書き込み |
+
+**グリッド状態（16マスの汚れ配置）は Firebase に送信しません。各端末でローカル管理します。**
+
+### Firebase データ構造
+
+```
+rooms/{roomId}/
+  status:    "waiting" | "ready" | "playing" | "finished"
+  createdAt: timestamp
+  startAt:   timestamp
+  host:      "player1"
+  players/
+    player1/ { joined, ready, name, dirtyCount, alive, timedOut }
+    player2/ { joined, ready, name, dirtyCount, alive, timedOut }
+  attackEvents/
+    {eventId}/ { id, from, to, type, amount, createdAt }
+```
+
+### ファイル構成（Phase 1）
+
+```
+panic-wash/
+├── index.html           ← 全画面を含む
+├── css/style.css        ← ロビー/ゲーム/結果の全スタイル
+├── js/
+│   ├── firebase-config.js  ← ★ここに設定値を入力
+│   └── app.js           ← Firebase連携含むゲームロジック
+└── README.md
+```
+
+### 今後の課題
+
+- Firebase Security Rules の本番用設定（認証付き）
+- 切断検知（`onDisconnect` による自動クリーンアップ）
+- ルーム一覧・マッチメイキング機能
+- 観戦モード・リプレイ機能
+- Firestore によるランキング・戦績記録
+- PWA 対応（オフラインキャッシュ）
+
+---
+
+## Phase 0 — ローカル同一端末版（参考）
