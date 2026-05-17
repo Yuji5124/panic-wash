@@ -217,3 +217,19 @@ panic-wash/
 ---
 
 ## Phase 0 — ローカル同一端末版（参考）
+
+Phase 0 は Firebase なしで同一端末の上下2画面で遊べる試作版です。
+`index.html` を直接ブラウザで開くだけで動作します（サーバー不要）。
+
+### Phase 0 のバランス値
+
+| 定数 | 値 | 説明 |
+|---|---|---|
+| `GAME_DURATION_SEC` | 60 秒 | 制限時間 |
+| `DIRTY_INTERVAL_MS` | 1800 ms | 汚れ自動追加間隔 |
+| `INITIAL_DIRTY` | 3 マス | 開始時の初期汚れ数 |
+| `ZENKESHI_DIRTY` | 5 マス | 全消し攻撃で追加する汚れ数 |
+| `ZENKESHI_DURATION_MS` | 5000 ms | 全消しボタンの有効時間 |
+
+> Phase 1（Firebase版）では `js/firebase-config.js` の設定が必要です。
+> `apiKey` が `YOUR_API_KEY` のままだと起動時にエラー画面を表示します。

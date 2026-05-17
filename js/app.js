@@ -154,16 +154,24 @@
 
       // トランザクションで player2 スロットを確保（競合防止）
       db.ref('rooms/' + roomId + '/players/player2').transaction(function(cur) {
-        if (cur !== null) return; // abort
+        if (cur !== null) return; // abort: すでに player2 がいる
         return { joined: true, ready: false, name: 'Player 2',
                  dirtyCount: 0, alive: true, timedOut: false };
       }).then(function(result) {
         if (!result.committed) { showLobbyError('このルームは満員です'); return; }
-        session.roomId  = roomId;
-        session.myRole  = 'player2';
-        session.oppRole = 'player1';
-        db.ref('rooms/' + roomId + '/status').set('ready');
-        enterReadyScreen(roomId);
+        // トランザクション成功後に status を再確認（参加直前にゲームが始まった競合を防ぐ）
+        return db.ref('rooms/' + roomId + '/status').once('value').then(function(s) {
+          if (s.val() === 'playing' || s.val() === 'finished') {
+            db.ref('rooms/' + roomId + '/players/player2').remove();
+            showLobbyError('このルームはすでにゲーム中です');
+            return;
+          }
+          session.roomId  = roomId;
+          session.myRole  = 'player2';
+          session.oppRole = 'player1';
+          db.ref('rooms/' + roomId + '/status').set('ready');
+          enterReadyScreen(roomId);
+        });
       }).catch(function(e) { showLobbyError('参加失敗: ' + e.message); });
     }).catch(function(e) { showLobbyError('エラー: ' + e.message); });
   }
