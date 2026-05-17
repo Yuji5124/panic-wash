@@ -117,7 +117,13 @@
   }
 
   // ===== ロビー =====
+  function setLobbyBusy(busy) {
+    dom.btnCreate.disabled = busy;
+    dom.btnJoin.disabled   = busy;
+  }
+
   function onCreateRoom() {
+    setLobbyBusy(true);
     var roomId = generateRoomId();
     session.roomId  = roomId;
     session.myRole  = 'player1';
@@ -135,21 +141,25 @@
       dom.displayRoomId.textContent = roomId;
       showScreen('waiting');
       listenForOpponentJoin(roomId);
-    }).catch(function(e) { showLobbyError('作成失敗: ' + e.message); });
+    }).catch(function(e) {
+      setLobbyBusy(false);
+      showLobbyError('作成失敗: ' + e.message);
+    });
   }
 
   function onJoinRoom() {
     var roomId = dom.inputRoomId.value.trim().toUpperCase();
     if (roomId.length < 4) { showLobbyError('ルームIDを入力してください'); return; }
 
+    setLobbyBusy(true);
     db.ref('rooms/' + roomId).once('value').then(function(snap) {
-      if (!snap.exists()) { showLobbyError('ルームが見つかりません'); return; }
+      if (!snap.exists()) { setLobbyBusy(false); showLobbyError('ルームが見つかりません'); return; }
       var room = snap.val();
       if (room.status === 'playing' || room.status === 'finished') {
-        showLobbyError('このルームはすでにゲーム中です'); return;
+        setLobbyBusy(false); showLobbyError('このルームはすでにゲーム中です'); return;
       }
       if (room.players && room.players.player2 && room.players.player2.joined) {
-        showLobbyError('このルームは満員です'); return;
+        setLobbyBusy(false); showLobbyError('このルームは満員です'); return;
       }
 
       // トランザクションで player2 スロットを確保（競合防止）
@@ -163,6 +173,7 @@
         return db.ref('rooms/' + roomId + '/status').once('value').then(function(s) {
           if (s.val() === 'playing' || s.val() === 'finished') {
             db.ref('rooms/' + roomId + '/players/player2').remove();
+            setLobbyBusy(false);
             showLobbyError('このルームはすでにゲーム中です');
             return;
           }
@@ -172,8 +183,8 @@
           db.ref('rooms/' + roomId + '/status').set('ready');
           enterReadyScreen(roomId);
         });
-      }).catch(function(e) { showLobbyError('参加失敗: ' + e.message); });
-    }).catch(function(e) { showLobbyError('エラー: ' + e.message); });
+      }).catch(function(e) { setLobbyBusy(false); showLobbyError('参加失敗: ' + e.message); });
+    }).catch(function(e) { setLobbyBusy(false); showLobbyError('エラー: ' + e.message); });
   }
 
   function showLobbyError(msg) {
@@ -471,6 +482,7 @@
       var p = snap.val() || {};
       if (p[session.oppRole] && p[session.oppRole].timedOut === true) {
         playersRef.off('value', h);
+        removeRef(playersRef);
         clearTimeout(timeoutFallback);
         var myC   = p[session.myRole]  ? (p[session.myRole].dirtyCount  || 0) : 99;
         var oppC  = p[session.oppRole] ? (p[session.oppRole].dirtyCount || 0) : 99;
@@ -479,10 +491,13 @@
         else                 endGame('draw', 'timeup');
       }
     });
+    // activeRefs に登録して leaveRoom() や endGame() 経由でも確実に解除できるようにする
+    activeRefs.push({ ref: playersRef, event: 'value', handler: h });
 
     // 相手が切断した場合の保険（5秒後）
     timeoutFallback = setTimeout(function() {
       playersRef.off('value', h);
+      removeRef(playersRef);
       if (!game.finished) endGame('win', 'timeup');
     }, 5000);
   }
@@ -541,6 +556,7 @@
     game.finished = true;
     dom.lobbyError.textContent = '';
     dom.inputRoomId.value = '';
+    setLobbyBusy(false);
     showScreen('lobby');
   }
 
